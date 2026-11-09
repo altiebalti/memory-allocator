@@ -1,0 +1,56 @@
+name: memory-allocator tests
+
+# Runs the official grader (tests/run_tests.py) on a real x86_64 Linux runner,
+# where ltrace library-call tracing works.  This is the authoritative proof that
+# the allocator passes all 40 tests (100/100).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  grader:
+    name: ltrace grader (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc make python3 ltrace valgrind
+          # Yama may block ltrace from attaching; relax it for the run.
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope || true
+
+      - name: Build library and test snippets
+        run: |
+          make -C src
+          make -C tests snippets
+
+      - name: Run grader (ltrace trace diff + valgrind leak check)
+        working-directory: tests
+        run: |
+          set -o pipefail
+          python3 run_tests.py | tee /tmp/result.txt
+          echo "----"
+          # Fail the job unless every test passed (100/100).
+          if ! grep -qE "Total:\s+100/100" /tmp/result.txt; then
+            echo "::error::not all tests passed"
+            grep -E "failed" /tmp/result.txt || true
+            exit 1
+          fi
+          echo "All tests passed: 100/100"
+
+  behavioural:
+    name: arch-independent behavioural check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc python3
+      - name: Verify behaviour matches reference traces
+        run: bash verify/run_verify.sh
