@@ -8,51 +8,24 @@
 #include "osmem.h"
 #include "block_meta.h"
 
-/*
- * Minimal implementation of malloc/calloc/realloc/free on top of the Linux
- * brk() and mmap() system calls.
- *
- * Design overview
- * ---------------
- *  - Every allocation is prefixed by a `struct block_meta` header.  The header
- *    is 32 bytes on a 64-bit machine and, together with every payload, is kept
- *    aligned to 8 bytes.
- *  - "Small" requests are served from the program break (brk/sbrk); "large"
- *    ones are served through anonymous mmap().  The threshold is the payload
- *    plus header crossing MMAP_THRESHOLD for malloc/realloc and the page size
- *    for calloc.
- *  - On the very first heap use we preallocate a full MMAP_THRESHOLD (128 KiB)
- *    chunk and carve later allocations out of it, which keeps the number of
- *    brk() calls low.
- *  - Heap blocks are kept in an address-ordered doubly linked list.  Freed
- *    heap blocks are only marked STATUS_FREE (the break is never lowered) and
- *    reused later with a best-fit search.  Adjacent free blocks are coalesced
- *    lazily, right before a search and while a realloc grows in place.
- *  - mmap()-ed blocks are self contained: they are not part of the list and
- *    are returned to the OS with munmap() on free.
- */
-
 #define ALIGNMENT		8
 #define ALIGN(size)		(((size) + (ALIGNMENT - 1)) & ~((size_t)(ALIGNMENT - 1)))
 #define META_SIZE		(ALIGN(sizeof(struct block_meta)))
 #define MMAP_THRESHOLD		(128 * 1024)
 
-/* Head of the address-ordered list of heap (brk) blocks. */
+/* Address-ordered list of heap (brk) blocks; mmap blocks stay out of it. */
 static struct block_meta *heap_head;
 
-/* Return the payload pointer that corresponds to a block header. */
 static inline void *block_to_payload(struct block_meta *block)
 {
 	return (void *)((char *)block + META_SIZE);
 }
 
-/* Return the block header that corresponds to a payload pointer. */
 static inline struct block_meta *payload_to_block(void *ptr)
 {
 	return (struct block_meta *)((char *)ptr - META_SIZE);
 }
 
-/* Walk to the last block in the heap list. */
 static struct block_meta *heap_last_block(void)
 {
 	struct block_meta *block = heap_head;
@@ -64,7 +37,6 @@ static struct block_meta *heap_last_block(void)
 	return block;
 }
 
-/* Merge every pair of adjacent free blocks in the list. */
 static void coalesce_heap(void)
 {
 	struct block_meta *block = heap_head;
@@ -81,7 +53,7 @@ static void coalesce_heap(void)
 	}
 }
 
-/* Best-fit: smallest free block that can hold `payload` bytes. */
+/* Smallest free block that fits. */
 static struct block_meta *find_best_fit(size_t payload)
 {
 	struct block_meta *best = NULL;
@@ -97,11 +69,7 @@ static struct block_meta *find_best_fit(size_t payload)
 	return best;
 }
 
-/*
- * Split `block` so that it holds exactly `payload` bytes and the remaining
- * space becomes a new free block.  The split is only performed when the
- * leftover can hold a header plus at least ALIGNMENT bytes of usable payload.
- */
+/* Split only if the leftover holds a header plus at least ALIGNMENT bytes. */
 static void split_block(struct block_meta *block, size_t payload)
 {
 	struct block_meta *rest;
@@ -121,7 +89,6 @@ static void split_block(struct block_meta *block, size_t payload)
 	block->size = payload;
 }
 
-/* Grow the program break by `increment` bytes, returning the old break. */
 static void *grow_break(size_t increment)
 {
 	void *prev = sbrk(increment);
@@ -130,16 +97,11 @@ static void *grow_break(size_t increment)
 	return prev;
 }
 
-/* Preallocate the first 128 KiB heap chunk as a single free block. */
+/* First heap use: grab a full 128 KiB chunk as one free block. */
 static void preallocate_heap(void)
 {
-	struct block_meta *block;
+	struct block_meta *block = (struct block_meta *)sbrk(0);
 
-	/*
-	 * sbrk(0) reports the current break (this is the brk(0) seen in the
-	 * reference traces); sbrk(MMAP_THRESHOLD) then extends it by 128 KiB.
-	 */
-	block = (struct block_meta *)sbrk(0);
 	DIE(block == (void *)-1, "sbrk");
 	grow_break(MMAP_THRESHOLD);
 
@@ -150,7 +112,6 @@ static void preallocate_heap(void)
 	heap_head = block;
 }
 
-/* Allocate `payload` (already aligned) bytes on the heap. */
 static struct block_meta *alloc_on_heap(size_t payload)
 {
 	struct block_meta *block, *last;
@@ -167,17 +128,15 @@ static struct block_meta *alloc_on_heap(size_t payload)
 		return block;
 	}
 
-	/* No free block is large enough. */
 	last = heap_last_block();
 	if (last && last->status == STATUS_FREE) {
-		/* Extend the last block if it is free. */
+		/* Extend the last block in place instead of making a new one. */
 		grow_break(payload - last->size);
 		last->size = payload;
 		last->status = STATUS_ALLOC;
 		return last;
 	}
 
-	/* Otherwise append a brand new block at the top of the heap. */
 	block = (struct block_meta *)grow_break(META_SIZE + payload);
 	block->size = payload;
 	block->status = STATUS_ALLOC;
@@ -190,7 +149,6 @@ static struct block_meta *alloc_on_heap(size_t payload)
 	return block;
 }
 
-/* Allocate `payload` (already aligned) bytes through mmap(). */
 static struct block_meta *alloc_mapped(size_t payload)
 {
 	size_t total = META_SIZE + payload;
@@ -207,7 +165,7 @@ static struct block_meta *alloc_mapped(size_t payload)
 	return block;
 }
 
-/* Core allocation path shared by malloc and calloc (threshold differs). */
+/* Shared by malloc and calloc; only the mmap threshold differs. */
 static void *allocate(size_t size, size_t mmap_threshold)
 {
 	size_t payload;
@@ -236,7 +194,6 @@ void *os_calloc(size_t nmemb, size_t size)
 	if (nmemb == 0 || size == 0)
 		return NULL;
 
-	/* Guard against size_t overflow of nmemb * size. */
 	if (nmemb > (size_t)-1 / size)
 		return NULL;
 
@@ -247,7 +204,6 @@ void *os_calloc(size_t nmemb, size_t size)
 	return ptr;
 }
 
-/* Internal free, used both by os_free() and by os_realloc(). */
 static void free_block(void *ptr)
 {
 	struct block_meta *block;
@@ -262,7 +218,7 @@ static void free_block(void *ptr)
 		return;
 	}
 
-	/* Heap block: mark free and reuse later (coalescing is lazy). */
+	/* Heap block: mark free, reuse later (coalescing is lazy). */
 	block->status = STATUS_FREE;
 }
 
@@ -271,7 +227,7 @@ void os_free(void *ptr)
 	free_block(ptr);
 }
 
-/* Allocate a fresh block, copy over the old payload and release the old one. */
+/* Fall-back for realloc: allocate, copy, free the old block. */
 static void *realloc_relocate(struct block_meta *block, void *ptr, size_t size)
 {
 	void *new_ptr = allocate(size, MMAP_THRESHOLD);
@@ -301,34 +257,27 @@ void *os_realloc(void *ptr, size_t size)
 
 	block = payload_to_block(ptr);
 
-	/* Robustness guard: realloc on an already-free block is undefined. */
 	if (block->status == STATUS_FREE)
 		return NULL;
 
 	payload = ALIGN(size);
 
-	/*
-	 * A mapped block cannot be resized in place (mremap is forbidden) and a
-	 * heap block that grows past the threshold must migrate to mmap, so both
-	 * cases relocate.
-	 */
+	/* Mapped blocks and heap blocks crossing the threshold must relocate. */
 	if (block->status == STATUS_MAPPED || META_SIZE + payload >= MMAP_THRESHOLD)
 		return realloc_relocate(block, ptr, size);
 
-	/* Shrinking (or same size): keep the block, split off any leftover. */
 	if (payload <= block->size) {
 		split_block(block, payload);
 		return ptr;
 	}
 
-	/* Growing the last block: just push the break up. */
 	if (!block->next) {
 		grow_break(payload - block->size);
 		block->size = payload;
 		return ptr;
 	}
 
-	/* Growing: try to absorb following free neighbours one at a time. */
+	/* Grow in place by absorbing following free neighbours. */
 	while (block->size < payload && block->next &&
 	       block->next->status == STATUS_FREE) {
 		block->size += META_SIZE + block->next->size;
@@ -342,13 +291,11 @@ void *os_realloc(void *ptr, size_t size)
 		return ptr;
 	}
 
-	/* Absorbing made the block the last one: extend the break. */
 	if (!block->next) {
 		grow_break(payload - block->size);
 		block->size = payload;
 		return ptr;
 	}
 
-	/* Still too small and boxed in: relocate. */
 	return realloc_relocate(block, ptr, size);
 }
