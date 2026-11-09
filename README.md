@@ -1,5 +1,7 @@
 # Memory Allocator
 
+**Лабораторна робота №2** · Тимченко Олександр, група ТК-41
+
 Реалізація власного алокатора пам'яті мовою C — рішення завдання
 [Memory Allocator](https://github.com/open-education-hub/operating-systems/tree/main/content/assignments/memory-allocator)
 (OpenEduHub · Operating Systems). Повний текст завдання — у [`ASSIGNMENT.md`](ASSIGNMENT.md).
