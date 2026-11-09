@@ -35,13 +35,14 @@ jobs:
           set -o pipefail
           python3 run_tests.py | tee /tmp/result.txt
           echo "----"
-          # Fail the job unless every test passed (100/100).
-          if ! grep -qE "Total:\s+100/100" /tmp/result.txt; then
-            echo "::error::not all tests passed"
-            grep -E "failed" /tmp/result.txt || true
+          # The 40 tests' point values sum to 90, so a perfect run prints
+          # "Total: 90/100". Fail only if any individual test failed.
+          if grep -qE "failed \.\.\." /tmp/result.txt; then
+            echo "::error::some tests failed"
+            grep -E "failed \.\.\." /tmp/result.txt
             exit 1
           fi
-          echo "All tests passed: 100/100"
+          echo "All 40 tests passed (maximum automated score: 90/100)."
 
   behavioural:
     name: arch-independent behavioural check

@@ -73,17 +73,24 @@ make check          # повна перевірка: ltrace-діф + перев�
 python3 run_tests.py
 ```
 
-Очікуваний результат:
+Очікуваний результат — **усі 40 тестів пройдено**:
 
 ```
-Total:                                                        100/100
+...
+test-all                         ........................ passed ...   5
+
+Total:                                                         90/100
 ```
+
+> Сума балів 40 тестів = **90**, тож при повному проходженні грейдер показує
+> `Total: 90/100` — це максимум автоматичної частини (решта 10 балів — поза
+> автотестами). «Passed» у кожному рядку означає, що траса збіглася з еталоном.
 
 ### Результати тестів — `screenshots/`
 
 | Що | Файл |
 |---|---|
-| Офіційний грейдер `ltrace`, 100/100 (GitHub Actions, x86_64) | [`screenshots/ci-grader.png`](screenshots/ci-grader.png) |
+| Офіційний грейдер `ltrace`, усі 40 тестів passed / 90/100 (GitHub Actions, x86_64) | [`screenshots/ci-grader.png`](screenshots/ci-grader.png) |
 | Перевірка поведінки 40/40 у Docker (на цій машині) | [`screenshots/verify-docker.png`](screenshots/verify-docker.png) |
 | `valgrind` без витоків | [`screenshots/valgrind.png`](screenshots/valgrind.png) |
 
