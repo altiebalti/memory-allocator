@@ -88,13 +88,21 @@ Total:                                                         90/100
 > `Total: 90/100` — це максимум автоматичної частини (решта 10 балів — поза
 > автотестами). «Passed» у кожному рядку означає, що траса збіглася з еталоном.
 
-### Результати тестів — `screenshots/`
+### Результати тестів — скріншоти запуску
 
-| Що | Файл |
-|---|---|
-| Офіційний грейдер `ltrace`, усі 40 тестів passed / 90/100 (GitHub Actions, x86_64) | [`screenshots/ci-grader.png`](screenshots/ci-grader.png) |
-| Перевірка поведінки 40/40 у Docker (на цій машині) | [`screenshots/verify-docker.png`](screenshots/verify-docker.png) |
-| `valgrind` без витоків | [`screenshots/valgrind.png`](screenshots/valgrind.png) |
+**1. Офіційний грейдер `ltrace` — усі 40 тестів `passed` (x86_64, GitHub Actions).**
+Сума балів тестів = 90, тож повний прохід дає `Total: 90/100`.
+
+![Офіційний грейдер: 40/40 passed, 90/100](screenshots/ci-grader.png)
+
+**2. Перевірка поведінки проти еталонних трас — 40/40 (Docker на цій машині, aarch64).**
+Відтворює ту саму перевірку без `ltrace` — див. [`verify/`](verify/README.md).
+
+![Перевірка поведінки: PASS=40 FAIL=0](screenshots/verify-docker.png)
+
+**3. `valgrind --leak-check=full` — 0 помилок, 0 витоків.**
+
+![valgrind: 0 errors, 0 leaks](screenshots/valgrind.png)
 
 CI проганяє офіційний грейдер на справжньому x86_64-раннері при кожному push —
 див. `.github/workflows/tests.yml` та вкладку **Actions**.
